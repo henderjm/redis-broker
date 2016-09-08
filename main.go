@@ -1,9 +1,16 @@
 package main
 
-import "code.cloudfoundry.org/lager"
-import "fmt"
+import (
+	"fmt"
+	"os"
+
+	"code.cloudfoundry.org/lager"
+	"github.com/pivotal-cf/brokerapi"
+)
+
 import "sync"
-import "github.com/pivotal-cf/brokerapi"
+
+import "net/http"
 
 func main() {
 	redisServiceBroker := &redisServiceBroker{}
@@ -26,6 +33,9 @@ func main() {
 	}
 	brokerAPI := brokerapi.New(redisServiceBroker, logger, credentials)
 	logger.Info("brokerApi intialized")
+	http.Handle("/", brokerAPI)
+	cfPort := os.Getenv("PORT")
+	http.ListenAndServe(":"+cfPort, nil)
 }
 
 // copyWriter is an INTENTIONALLY UNSAFE writer. Use it to test code that
@@ -60,11 +70,33 @@ func (writer *copyWriter) Copy() []byte {
 	return contents
 }
 
-type redisServiceBroker struct{}
+type redisServiceBroker struct {
+	LastOperationState       brokerapi.LastOperationState
+	LastOperationDescription string
+}
 
 func (*redisServiceBroker) Services() []brokerapi.Service {
 	// Return a []brokerapi.Service here, describing your service(s) and plan(s)
-	return nil
+	return []brokerapi.Service{
+		brokerapi.Service{
+			ID:            "AWS/us-east-1",
+			Name:          "onboardingRedis",
+			Description:   "Redis service for an application that wants a redis DB",
+			Bindable:      true,
+			PlanUpdatable: true,
+			Plans: []brokerapi.ServicePlan{
+				brokerapi.ServicePlan{
+					ID:          "1",
+					Name:        "Standard 30",
+					Description: "Default Redis plan",
+				},
+			},
+			Tags: []string{
+				"pivotal",
+				"redis",
+			},
+		},
+	}
 }
 
 func (*redisServiceBroker) Provision(
@@ -74,20 +106,22 @@ func (*redisServiceBroker) Provision(
 ) (brokerapi.ProvisionedServiceSpec, error) {
 	// Provision a new instance here. If async is allowed, the broker can still
 	// chose to provision the instance synchronously.
-	return nil, nil
+
+	//TODO Removed hardcoded dashboard URL
+	return brokerapi.ProvisionedServiceSpec{DashboardURL: "dashboardURL", IsAsync: false, OperationData: "blah"}, nil
 }
 
-func (*redisServiceBroker) LastOperation(instanceID, operationData string) (brokerapi.LastOperation, error) {
+func (rsb *redisServiceBroker) LastOperation(instanceID, operationData string) (brokerapi.LastOperation, error) {
 	// If the broker provisions asynchronously, the Cloud Controller will poll this endpoint
 	// for the status of the provisioning operation.
 	// This also applies to deprovisioning (work in progress).
-	return nil, nil
+	return brokerapi.LastOperation{State: rsb.LastOperationState, Description: rsb.LastOperationDescription}, nil
 }
 
-func (*redisServiceBroker) Deprovision(instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (brokerapi.DeprovisionServiceSpec, error) {
+func (rsb *redisServiceBroker) Deprovision(instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (brokerapi.DeprovisionServiceSpec, error) {
 	// Deprovision a new instance here. If async is allowed, the broker can still
 	// chose to deprovision the instance synchronously, hence the first return value.
-	return nil, nil
+	return brokerapi.DeprovisionServiceSpec{IsAsync: false}, nil
 }
 
 func (*redisServiceBroker) Bind(instanceID, bindingID string, details brokerapi.BindDetails) (brokerapi.Binding, error) {
@@ -118,5 +152,5 @@ func (*redisServiceBroker) Unbind(instanceID, bindingID string, details brokerap
 
 func (*redisServiceBroker) Update(instanceID string, details brokerapi.UpdateDetails, asyncAllowed bool) (brokerapi.UpdateServiceSpec, error) {
 	// Update instance here
-	return nil, nil
+	return brokerapi.UpdateServiceSpec{IsAsync: false}, nil
 }
